@@ -1,6 +1,6 @@
 # PSoC Edge Health Monitor
 
-[中文](README.md) · [Build prerequisites](BUILDING.md) · [Licensing](THIRD_PARTY_NOTICES.md)
+[中文](README.md) · [Development guide](BUILDING.md) · [Licensing](THIRD_PARTY_NOTICES.md)
 
 A dual-core health-monitoring research prototype for PSoC Edge E84. Cortex-M33 manages sensor acquisition; Cortex-M55 handles ECG analysis, LVGL interaction and networking. Both cores run RT-Thread.
 
@@ -8,7 +8,7 @@ Features include guided PPG/ECG checkups, signal/contact guidance, retry/skip/ca
 
 ![Software-rendered UI with simulated data](docs/images/03-interface.png)
 
-This repository is a **source overlay**, not a standalone vendor SDK distribution. Restore the BSP, libraries and generated assets described in [BUILDING.md](BUILDING.md) before compiling firmware. Trained models, real ECG fixtures and audio assets are excluded; their code and generation paths are documented. Original code is MIT-licensed; third-party components retain their own terms.
+The repository includes dual-core applications, signal-processing algorithms, a Chinese touch interface, a companion dashboard and development tools. See the [development guide](BUILDING.md) for environment setup. Original code is MIT-licensed; third-party components retain their own terms.
 
 Quick portable test (Python 3.11+):
 

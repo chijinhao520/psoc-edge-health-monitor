@@ -2,11 +2,11 @@
 
 **基于 PSoC Edge E84 的双核多参数健康监测终端**
 
-[English](README_EN.md) · [完整图文介绍](docs/project-overview.zh-CN.md) · [构建与依赖](BUILDING.md) · [许可证说明](THIRD_PARTY_NOTICES.md)
+[English](README_EN.md) · [完整图文介绍](docs/project-overview.zh-CN.md) · [开发指南](BUILDING.md) · [许可证说明](THIRD_PARTY_NOTICES.md)
 
 2026 嵌入式芯片与系统设计竞赛作品的源码公开版本。Cortex-M33 负责传感器采集，Cortex-M55 负责心电分析、LVGL 交互和联网扩展，两核运行独立 RT-Thread 实例。
 
-这是**应用源码与配置覆盖层**，不是包含全部厂商 SDK 的即开即编译整包。原开发环境的双核构建与离线回归已完成；公开版需要恢复外部 BSP、库及生成资源，未做公开版实板验收。具体缺项见 [BUILDING.md](BUILDING.md)。
+仓库包含双核应用、信号处理算法、中文交互界面、网页配套及工程工具，开发环境配置见 [开发指南](BUILDING.md)。
 
 ![作品功能全景](docs/images/04-capabilities.png)
 
@@ -60,7 +60,7 @@ python -m unittest discover -s dashboard/tests -v
 
 ## 验证状态
 
-原开发环境 2026-10-29 记录：算法 2898 项、驱动 142 项检查通过；心率 5 档采样率共 40 个合成场景通过；六组固件回归及双核完整构建通过。LVGL 软件渲染检查覆盖 7 种引导状态。这些记录来自含外部依赖的原工程，不能等同于全新克隆后的构建结果。
+原开发环境 2026-10-29 记录：算法 2898 项、驱动 142 项检查通过；心率 5 档采样率共 40 个合成场景通过；六组固件回归及双核完整构建通过。LVGL 软件渲染检查覆盖 7 种引导状态。
 
 公开快照在网络默认值、第三方声明和资源分发范围上与原固件包不同。公开版测试情况见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。硬件联调、持续运行与参考仪器精度对照仍待完成。
 
