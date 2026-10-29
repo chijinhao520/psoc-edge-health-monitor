@@ -1,0 +1,12 @@
+{
+  "source_revision": "08eac0aea2d9e5b2b68c9bc38dd35e0d55202120",
+  "includes_uncommitted_changes": true,
+  "excluded_generated_assets": [
+    "arrhythmia_model.h",
+    "arrhythmia_test_data.h",
+    "glucose_model.h",
+    "voice_data.c"
+  ],
+  "snapshot_date": "2026-10-29",
+  "release_type": "source-overlay"
+}

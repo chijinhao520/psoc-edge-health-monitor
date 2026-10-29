@@ -1,0 +1,28 @@
+# 训练 pipeline 依赖
+# Python 3.10（与 Vela 环境一致）
+# 安装：pip install -r requirements.txt
+
+# 核心数值
+numpy>=1.24,<2.0
+scipy>=1.10            # signal.resample_poly 抗混叠重采样
+pandas>=2.0
+scikit-learn>=1.3      # KFold + 评估指标
+
+# .mat 文件读取（MUST 数据集格式）
+h5py>=3.9              # MATLAB v7.3 .mat
+hdf5storage>=0.1.19    # 兼容老版本 .mat
+
+# 深度学习（CPU 即可，模型小）
+tensorflow==2.15.0     # 跟 Vela 工具链兼容；TFLite Micro 工具链原生
+# torch>=2.1            # 备选，如果想用 PyTorch 实现
+
+# 可视化（评估 + Clarke Error Grid）
+matplotlib>=3.7
+seaborn>=0.12
+
+# 下载工具
+requests>=2.31
+tqdm>=4.66
+
+# TFLite 验证
+tflite-runtime>=2.14   # 量化后端到端推理对照

@@ -1,0 +1,43 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*_token.txt
+*.pem
+*.key
+# Local/private data and build products
+cache/
+data/
+models/
+outputs/
+Debug/
+build/
+build_*/
+__pycache__/
+.venv/
+*.pyc
+*.db
+*.sqlite*
+*.elf
+*.hex
+*.bin
+*.o
+*.obj
+*.map
+*.exe
+*.log
+*.zip
+.settings/
+.vscode/
+.DS_Store
+# Install SDKs separately; not redistributed in this source release.
+**/rt-thread/
+**/libraries/
+**/libs/
+**/DebugConfig/
+**/packages/*/
+# Regenerate optional assets under their own licenses.
+**/arrhythmia_model.h
+**/glucose_model.h
+**/arrhythmia_test_data.h
+**/voice_data.c

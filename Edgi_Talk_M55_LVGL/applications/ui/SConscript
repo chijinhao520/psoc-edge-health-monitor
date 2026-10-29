@@ -1,0 +1,11 @@
+import rtconfig
+from building import *
+import os
+
+cwd = GetCurrentDir()
+src = Glob('*.c') + Glob('fonts/*.c')
+path = [cwd]
+
+group = DefineGroup('UI', src, depend=[''], CPPPATH=path)
+
+Return('group')

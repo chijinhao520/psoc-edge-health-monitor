@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>健康监测终端 · 实时数据</title>
+<link rel="icon" href="data:,">
+<script src="{{ url_for('static', filename='vendor/chart.umd.js') }}"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-border: #334155;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --accent: #38bdf8;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    padding: 6px 16px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex-shrink: 0; }
+  .dot.online { background: var(--good); box-shadow: 0 0 6px var(--good); }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card .label { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .card .value { font-size: 26px; font-weight: 700; }
+  .card .unit { font-size: 13px; color: var(--text-dim); margin-left: 4px; font-weight: 400; }
+  .card.dim .value { color: var(--text-dim); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .panel-header h2 { font-size: 15px; margin: 0; color: var(--text-dim); font-weight: 600; }
+  .range-btns button {
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: 6px;
+  }
+  .range-btns button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  canvas { max-height: 320px; }
+  .empty-hint {
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 0;
+  }
+
+  /* AI 健康报告 */
+  #aiPanel { margin-bottom: 24px; }
+  .ai-actions { display: flex; align-items: center; gap: 10px; }
+  .ai-meta { font-size: 12px; color: var(--text-dim); }
+  .btn {
+    background: var(--accent);
+    border: none;
+    color: #0f172a;
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ai-body {
+    white-space: pre-wrap;
+    line-height: 1.75;
+    font-size: 14px;
+  }
+  .ai-body.hint {
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: center;
+    padding: 32px 0;
+  }
+  .ai-body.err { color: var(--bad); }
+  .device-picker { display: flex; align-items: center; gap: 8px; max-width: 100%; font-size: 13px; }
+  select { min-width: 0; max-width: 260px; padding: 10px; background: var(--panel); color: var(--text); border: 1px solid var(--panel-border); border-radius: 6px; }
+  .card .state { color: var(--text-dim); font-size: 11px; margin-top: 8px; }
+  #historyPanel { margin-bottom: 24px; }
+  .muted { color: var(--text-dim); font-size: 13px; line-height: 1.65; }
+  #historyMessage { min-height: 22px; }
+  .quality-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 12px 0; }
+  .quality-item { border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px; }
+  .quality-item strong { display: block; margin-top: 6px; font-size: 20px; }
+  .range-btns button { min-height: 40px; }
+  .btn { min-height: 40px; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  @media (max-width: 500px) {
+    body { padding: 12px; }
+    .status-bar { width: 100%; border-radius: 8px; overflow-wrap: anywhere; }
+    .ai-actions { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>健康监测终端 &middot; 实时数据</h1>
+  <label class="device-picker">设备 <select id="deviceSelect" aria-label="选择设备" disabled><option value="">等待设备数据</option></select></label>
+  <div class="status-bar">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">等待设备数据...</span>
+  </div>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<div class="panel" id="aiPanel">
+  <div class="panel-header">
+    <h2>AI 健康报告</h2>
+    <div class="ai-actions">
+      <span class="ai-meta" id="aiMeta"></span>
+      <button class="btn" id="aiBtn" disabled>生成报告</button>
+    </div>
+  </div>
+  <div class="ai-body hint" id="aiBody">点击「生成报告」，由大模型解读设备最近一次上传的数据。</div>
+</div>
+
+<div class="panel" id="historyPanel">
+  <div class="panel-header">
+    <h2>历史趋势</h2>
+    <div class="range-btns" id="rangeBtns">
+      <button data-hours="1">1小时</button>
+      <button data-hours="6">6小时</button>
+      <button data-hours="24" class="active">24小时</button>
+    </div>
+  </div>
+  <div id="historyMessage" class="muted" role="status"></div>
+  <canvas id="trendChart"></canvas>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2>数据可用情况与对照记录</h2>
+    <button class="btn" id="exportBtn" disabled>导出对照 CSV</button>
+  </div>
+  <div class="muted" id="coverageSummary" role="status">等待上传记录。</div>
+  <div class="quality-grid" id="coverageGrid"></div>
+  <div class="muted">统计所选设备和时间段内的有效上传记录占比，不代表检测准确率或独立测量次数。同一次测量可能多次上传。CSV 保留有效标志，无效值留空，并预留参考心率、参考血氧和备注栏。</div>
+  <div class="muted" id="exportMessage" role="status"></div>
+</div>
+
+<script>
+const CARD_DEFS = [
+  { key: "heart_rate",      label: "心率",     unit: "bpm",    decimals: 0, validKey: "hr_valid" },
+  { key: "spo2",            label: "血氧 SpO2", unit: "%",      decimals: 0, validKey: "spo2_valid" },
+  { key: "glucose",         label: "血糖",     unit: "mmol/L", decimals: 2, validKey: "glucose_valid" },
+  { key: "bmr",             label: "BMR",      unit: "",       decimals: 1, validKey: "bmr_valid" },
+  { key: "hrv_rmssd_ms",    label: "HRV RMSSD", unit: "ms",     decimals: 1, validKey: "hrv_valid" },
+  { key: "resp_rate_bpm",   label: "呼吸率",   unit: "bpm",    decimals: 1, validKey: "resp_valid" },
+  { key: "health_score",    label: "健康评分", unit: "/100",   decimals: 0, validKey: "health_score_valid" },
+  { key: "env_temp",        label: "环境温度", unit: "°C", decimals: 1, validKey: "env_valid" },
+  { key: "env_humidity",    label: "环境湿度", unit: "%RH",    decimals: 1, validKey: "env_valid" },
+  { key: "body_temp",       label: "体表红外温度", unit: "°C", decimals: 1, validKey: "body_temp_valid" },
+];
+
+const cardsEl = document.getElementById("cards");
+CARD_DEFS.forEach(def => {
+  const div = document.createElement("div");
+  div.className = "card dim";
+  div.id = "card-" + def.key;
+  div.innerHTML = `<div class="label">${def.label}</div><div class="value">--<span class="unit">${def.unit}</span></div><div class="state">未测或已失效</div>`;
+  cardsEl.appendChild(div);
+});
+
+function fmt(v, decimals) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "--";
+  return Number(v).toFixed(decimals);
+}
+
+let selectedDevice = "";
+let latestRequest = 0, historyRequest = 0, aiRequest = 0;
+let aiEnabled = false;
+let historyHasRows = false;
+let exportBusy = false;
+let exportRequest = 0;
+const deviceSelect = document.getElementById("deviceSelect");
+const exportBtn = document.getElementById("exportBtn");
+function deviceUrl(path, device = selectedDevice) {
+  return path + "?" + new URLSearchParams({device_id: device});
+}
+async function getJson(url) {
+  const res = await fetch(url, {signal: AbortSignal.timeout(10000), cache: "no-store"});
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+}
+function clearLatest() {
+  document.getElementById("statusDot").classList.remove("online");
+  CARD_DEFS.forEach(def => {
+    const el = document.getElementById("card-" + def.key);
+    el.classList.add("dim");
+    el.querySelector(".value").innerHTML = `--<span class="unit">${def.unit}</span>`;
+    el.querySelector(".state").textContent = "未测或已失效";
+  });
+}
+async function refreshDevices() {
+  try {
+    const devices = await getJson("/api/devices");
+    deviceSelect.replaceChildren();
+    for (const device of devices) {
+      const option = new Option(`${device.device_id} · ${device.online ? "在线" : "离线"}`, device.device_id);
+      deviceSelect.add(option);
+    }
+    deviceSelect.disabled = !devices.length;
+    if (!devices.length) deviceSelect.add(new Option("等待设备数据", ""));
+    if (selectedDevice && devices.some(d => d.device_id === selectedDevice)) {
+      deviceSelect.value = selectedDevice;
+    } else {
+      selectDevice(devices.length ? devices[0].device_id : "");
+    }
+  } catch (e) {
+    document.getElementById("statusText").textContent = "设备列表获取失败，请检查服务连接。";
+  }
+}
+function selectDevice(device) {
+  selectedDevice = device;
+  deviceSelect.value = device;
+  latestRequest++; historyRequest++; aiRequest++;
+  exportRequest++; exportBusy = false;
+  clearLatest();
+  clearHistory();
+  aiBusy = false; aiHasReport = false;
+  aiBtn.disabled = !device || !aiEnabled;
+  aiBtn.textContent = "生成报告";
+  aiMeta.textContent = "";
+  setAiBody(aiEnabled ? "点击「生成报告」，解读所选设备最近一次上传的数据。" : "AI 报告功能未启用。数据查看和导出仍可使用。", "hint");
+  document.getElementById("exportMessage").textContent = "";
+  document.getElementById("statusText").textContent = device ? "正在读取所选设备..." : "等待设备数据...";
+  if (device) { refreshLatest(); refreshHistory(); }
+}
+deviceSelect.addEventListener("change", () => selectDevice(deviceSelect.value));
+
+async function refreshLatest() {
+  if (!selectedDevice) return;
+  const device = selectedDevice, token = ++latestRequest;
+  try {
+    const data = await getJson(deviceUrl("/api/latest", device));
+    if (token !== latestRequest || device !== selectedDevice) return;
+
+    const dot = document.getElementById("statusDot");
+    const text = document.getElementById("statusText");
+    if (data.online) {
+      dot.classList.add("online");
+      const t = data.telemetry;
+      text.textContent = `设备在线 · 最近上传 ${t ? new Date(t.ts).toLocaleString() : "未知"}`;
+    } else {
+      dot.classList.remove("online");
+      text.textContent = data.last_seen
+        ? `设备离线，最后上线：${new Date(data.last_seen).toLocaleString()}`
+        : "等待设备数据...";
+    }
+
+    const t = data.telemetry;
+    CARD_DEFS.forEach(def => {
+      const el = document.getElementById("card-" + def.key);
+      const valid = def.validKey ? t && t[def.validKey] === 1 : true;
+      const v = t ? t[def.key] : null;
+      const show = t && valid && v !== null && v !== undefined;
+      el.classList.toggle("dim", !show || !data.online);
+      el.querySelector(".value").innerHTML =
+        (show ? fmt(v, def.decimals) : "--") + `<span class="unit">${def.unit}</span>`;
+      el.querySelector(".state").textContent = show ? (data.online ? "最近上传有效" : "离线前记录") : "未测或已失效";
+    });
+  } catch (e) {
+    if (token !== latestRequest || device !== selectedDevice) return;
+    clearLatest();
+    document.getElementById("statusText").textContent = "连接中断，无法确认最新数据，正在重试。";
+    console.error("refreshLatest failed", e);
+  }
+}
+
+let chart = null;
+let currentHours = 24;
+
+function clearHistory() {
+  if (chart) { chart.destroy(); chart = null; }
+  historyHasRows = false;
+  exportBtn.disabled = true;
+  document.getElementById("coverageGrid").replaceChildren();
+  document.getElementById("coverageSummary").textContent = selectedDevice ? "正在读取记录..." : "等待上传记录。";
+  document.getElementById("historyMessage").textContent = "";
+}
+function renderCoverage(rows) {
+  document.getElementById("coverageSummary").textContent = `最近 ${currentHours} 小时，共 ${rows.length} 条上传记录。`;
+  const grid = document.getElementById("coverageGrid");
+  grid.replaceChildren();
+  for (const def of CARD_DEFS.filter(d => ["heart_rate", "spo2", "hrv_rmssd_ms", "env_temp"].includes(d.key))) {
+    const valid = rows.filter(row => row[def.validKey] === 1 && Number.isFinite(row[def.key])).length;
+    const item = document.createElement("div");
+    item.className = "quality-item";
+    const label = document.createElement("span"); label.textContent = def.label;
+    const value = document.createElement("strong"); value.textContent = rows.length ? `${(100*valid/rows.length).toFixed(1)}%` : "--";
+    const detail = document.createElement("span"); detail.className = "muted"; detail.textContent = `${valid} / ${rows.length} 条有效`;
+    item.append(label, value, detail); grid.appendChild(item);
+  }
+}
+function trendPoints(rows, key) {
+  const points = [];
+  let previous = null;
+  for (const row of rows) {
+    if (previous !== null && row.ts - previous > 30000) points.push({x: previous + 1, y: null});
+    points.push({x: row.ts, y: row[key]}); previous = row.ts;
+  }
+  return points;
+}
+
+async function refreshHistory() {
+  if (!selectedDevice) return;
+  const device = selectedDevice, hours = currentHours, token = ++historyRequest;
+  try {
+    const rows = await getJson(deviceUrl("/api/history", device) + `&hours=${hours}`);
+    if (token !== historyRequest || device !== selectedDevice || hours !== currentHours) return;
+    renderCoverage(rows);
+    historyHasRows = rows.length > 0;
+    exportBtn.disabled = !historyHasRows || exportBusy;
+    document.getElementById("historyMessage").textContent = rows.length ? "断线和无效数据以空缺显示。" : "所选时间段暂无上传记录。";
+    if (typeof Chart === "undefined") {
+      document.getElementById("historyMessage").textContent += " 图表组件未加载，统计与导出仍可使用。";
+      return;
+    }
+
+    const hr = trendPoints(rows, "heart_rate");
+    const spo2 = trendPoints(rows, "spo2");
+
+    const ctx = document.getElementById("trendChart").getContext("2d");
+    const datasets = [
+      { label: "心率 (bpm)", data: hr, borderColor: "#38bdf8", backgroundColor: "transparent", tension: 0, pointRadius: 1, spanGaps: false },
+      { label: "SpO2 (%)", data: spo2, borderColor: "#34d399", backgroundColor: "transparent", tension: 0, pointRadius: 1, spanGaps: false, yAxisID: "spo2" },
+    ];
+
+    if (chart) {
+      chart.data.datasets = datasets;
+      chart.update();
+    } else {
+      chart = new Chart(ctx, {
+        type: "line",
+        data: { datasets },
+        options: {
+          responsive: true,
+          animation: false,
+          scales: {
+            x: { type: "linear", ticks: { color: "#94a3b8", maxTicksLimit: 8, callback: value => new Date(value).toLocaleTimeString() }, grid: { color: "#334155" } },
+            y: { ticks: { color: "#94a3b8" }, grid: { color: "#334155" } },
+            spo2: { position: "right", suggestedMin: 70, suggestedMax: 100, ticks: { color: "#34d399" }, grid: { drawOnChartArea: false } },
+          },
+          plugins: { legend: { labels: { color: "#e2e8f0" } }, tooltip: { callbacks: { title: items => items.length ? new Date(items[0].parsed.x).toLocaleString() : "" } } },
+        },
+      });
+    }
+  } catch (e) {
+    if (token !== historyRequest || device !== selectedDevice || hours !== currentHours) return;
+    clearHistory();
+    document.getElementById("historyMessage").textContent = "历史数据读取失败：" + e.message;
+    document.getElementById("coverageSummary").textContent = "暂时无法统计数据可用情况。";
+    console.error("refreshHistory failed", e);
+  }
+}
+
+document.getElementById("rangeBtns").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-hours]");
+  if (!btn) return;
+  document.querySelectorAll("#rangeBtns button").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  currentHours = Number(btn.dataset.hours);
+  exportRequest++; exportBusy = false;
+  document.getElementById("exportMessage").textContent = "";
+  clearHistory();
+  refreshHistory();
+});
+
+exportBtn.addEventListener("click", async () => {
+  const device = selectedDevice, hours = currentHours;
+  if (!device || exportBusy || !historyHasRows) return;
+  const token = ++exportRequest;
+  exportBusy = true;
+  exportBtn.disabled = true;
+  const message = document.getElementById("exportMessage");
+  message.textContent = "正在准备对照记录...";
+  try {
+    const res = await fetch(deviceUrl("/api/export.csv", device) + `&hours=${hours}`, {signal: AbortSignal.timeout(15000)});
+    if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (token !== exportRequest || device !== selectedDevice || hours !== currentHours) return;
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = "telemetry-reference.csv"; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message.textContent = "已准备下载。时间为服务器接收时间（UTC），参考值请按同步记录填写。";
+  } catch (e) {
+    if (token === exportRequest && device === selectedDevice && hours === currentHours) message.textContent = "导出失败：" + e.message;
+  } finally {
+    if (token === exportRequest && device === selectedDevice && hours === currentHours) {
+      exportBusy = false;
+      exportBtn.disabled = !historyHasRows;
+    }
+  }
+});
+
+// ---------------- AI 健康报告 ----------------
+// key 在服务端，前端只调本机 /api/ai_report 代理。
+const aiBtn = document.getElementById("aiBtn");
+const aiBody = document.getElementById("aiBody");
+const aiMeta = document.getElementById("aiMeta");
+let aiBusy = false;
+let aiHasReport = false;
+
+function setAiBody(text, cls) {
+  aiBody.className = "ai-body" + (cls ? " " + cls : "");
+  aiBody.textContent = text;
+}
+
+async function initAiPanel() {
+  try {
+    const s = await getJson("/api/ai_status");
+    aiEnabled = s.enabled;
+    aiBtn.disabled = !aiEnabled || !selectedDevice;
+    if (s.enabled && !aiBusy) setAiBody("点击「生成报告」，解读所选设备最近一次上传的数据。", "hint");
+    if (!s.enabled) {
+      aiBtn.disabled = true;
+      setAiBody("AI 报告功能未启用。数据查看和导出仍可使用。", "hint");
+    }
+  } catch (e) {
+    console.error("ai_status failed", e);
+  }
+}
+
+async function generateAiReport() {
+  if (aiBusy || !selectedDevice || !aiEnabled) return;
+  const device = selectedDevice, token = ++aiRequest;
+  aiBusy = true;
+  aiBtn.disabled = true;
+  aiBtn.textContent = "生成中...";
+  setAiBody("正在请求大模型，通常需要 5-20 秒...", "hint");
+
+  try {
+    const res = await fetch(deviceUrl("/api/ai_report", device), {
+      method: "POST",
+      signal: AbortSignal.timeout(70000),
+      headers: { "Content-Type": "application/json" },
+      // 已经出过一份报告时再点 = 用户想要新的，跳过服务端缓存
+      body: JSON.stringify({ force: aiHasReport }),
+    });
+    const data = await res.json();
+    if (token !== aiRequest || device !== selectedDevice) return;
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    setAiBody(data.report);
+    aiHasReport = true;
+    const when = new Date(data.generated_at * 1000).toLocaleTimeString();
+    aiMeta.textContent = `${data.cached ? "缓存 · " : ""}${data.model} · ${when}`;
+  } catch (e) {
+    if (token !== aiRequest || device !== selectedDevice) return;
+    setAiBody("生成失败：" + e.message, "err");
+  } finally {
+    if (token !== aiRequest || device !== selectedDevice) return;
+    aiBusy = false;
+    aiBtn.disabled = false;
+    aiBtn.textContent = aiHasReport ? "重新生成" : "生成报告";
+  }
+}
+
+aiBtn.addEventListener("click", generateAiReport);
+
+initAiPanel();
+refreshDevices();
+setInterval(refreshLatest, 5000);
+setInterval(refreshHistory, 30000);
+setInterval(refreshDevices, 30000);
+</script>
+
+</body>
+</html>

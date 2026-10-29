@@ -1,0 +1,21 @@
+# 心律不齐训练 pipeline 依赖
+# Python 3.10（与 Vela 环境一致）
+# 安装：pip install -r requirements.txt
+
+# 核心数值
+numpy>=1.24,<2.0
+scipy>=1.10            # signal.resample 重采样（部署对齐 AD8232 500Hz 时用）
+pandas>=2.0
+scikit-learn>=1.3      # 分层划分 + F1 / 混淆矩阵
+
+# MIT-BIH 数据集（PhysioNet 脚本化下载 + 注释读取）
+wfdb>=4.1
+
+# 深度学习（CPU 即可，模型小）
+tensorflow==2.15.0     # 跟 Vela 工具链兼容；TFLite Micro 工具链原生
+
+# 可视化（混淆矩阵）
+matplotlib>=3.7
+
+# 进度条
+tqdm>=4.66

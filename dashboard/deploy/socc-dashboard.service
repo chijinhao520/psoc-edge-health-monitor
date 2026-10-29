@@ -1,0 +1,20 @@
+[Unit]
+Description=SOCC health dashboard (MQTT subscriber + Flask API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/socc-dashboard
+Environment=MQTT_BROKER=broker.emqx.io
+# 无缓冲输出：systemd 下 python print 默认块缓冲，[server] 日志会憋在缓冲区
+# 看不到（实测 7/17：journalctl 只见 Flask/stderr 行，MQTT 连接日志全被吞）
+Environment=PYTHONUNBUFFERED=1
+# DEEPSEEK_API_KEY 放这里（权限 600），不进版本库。前缀 - 表示文件缺失也照常启动。
+EnvironmentFile=-/etc/socc-dashboard.env
+ExecStart=/opt/socc-dashboard/venv/bin/python /opt/socc-dashboard/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

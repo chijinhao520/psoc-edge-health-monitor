@@ -1,0 +1,501 @@
+diff --git a/inc/aht10.h b/inc/aht10.h
+index 1b0c15b..12e0c4c 100644
+--- a/inc/aht10.h
++++ b/inc/aht10.h
+@@ -1,4 +1,4 @@
+-/*
++﻿/*
+  * Copyright (c) 2006-2022, RT-Thread Development Team
+  *
+  * SPDX-License-Identifier: Apache-2.0
+@@ -18,10 +18,14 @@
+ 
+ typedef struct filter_data
+ {
++    /* 采样缓存，用于滑动平均 */
+     float buf[AHT10_AVERAGE_TIMES];
++    /* 当前平均值 */
+     float average;
+ 
++    /* 当前写入下标 */
+     rt_off_t index;
++    /* 缓冲区是否已写满一轮 */
+     rt_bool_t is_full;
+ 
+ } filter_data_t;
+@@ -29,52 +33,72 @@ typedef struct filter_data
+ 
+ struct aht10_device
+ {
++    /* 绑定的 RT-Thread I2C 总线设备 */
+     struct rt_i2c_bus_device *i2c;
+ 
+ #ifdef AHT10_USING_SOFT_FILTER
++    /* 温度/湿度软滤波数据 */
+     filter_data_t temp_filter;
+     filter_data_t humi_filter;
+ 
++    /* 软滤波线程句柄 */
+     rt_thread_t thread;
+-    rt_uint32_t period; //sample period
++    /* 采样周期，单位 ms */
++    rt_uint32_t period;
+ #endif /* AHT10_USING_SOFT_FILTER */
+ 
++    /* 互斥锁，保护 I2C 访问与共享数据 */
+     rt_mutex_t lock;
+ };
+ typedef struct aht10_device *aht10_device_t;
+ 
++typedef struct aht10_data
++{
++    float cur_humi;
++    float cur_temp;
++} aht10_data_t;
++
+ /**
+- * This function initializes aht10 registered device driver
++ * @brief 初始化 AHT10 设备驱动
+  *
+- * @param dev the name of aht10 device
++ * @param i2c_bus_name I2C 总线名称（例如 "i2c1"）
+  *
+- * @return the aht10 device.
++ * @return 成功返回设备句柄，失败返回 RT_NULL
+  */
+ aht10_device_t aht10_init(const char *i2c_bus_name);
+ 
+ /**
+- * This function releases memory and deletes mutex lock
++ * @brief 释放 AHT10 设备资源并删除互斥锁
+  *
+- * @param dev the pointer of device driver structure
++ * @param dev 设备驱动结构体指针
+  */
+ void aht10_deinit(aht10_device_t dev);
+ 
+ /**
+- * This function reads temperature by aht10 sensor measurement
++ * @brief 读取温度值
+  *
+- * @param dev the pointer of device driver structure
++ * @param dev 设备驱动结构体指针
+  *
+- * @return the relative temperature converted to float data.
++ * @return 温度（摄氏度）；异常时返回约定兜底值（-50.0）
+  */
+ float aht10_read_temperature(aht10_device_t dev);
+ 
+ /**
+- * This function reads relative humidity by aht10 sensor measurement
++ * @brief 读取湿度值
+  *
+- * @param dev the pointer of device driver structure
++ * @param dev 设备驱动结构体指针
+  *
+- * @return the relative humidity converted to float data.
++ * @return 相对湿度（%RH）；异常时返回约定兜底值（0.0）
+  */
+ float aht10_read_humidity(aht10_device_t dev);
+ 
++/**
++ * @brief 读取传感器数据
++ *
++ * @param dev 设备驱动结构体指针
++ * @param data 用于返回温湿度结果的数据结构体指针
++ *
++ */
++void read_sensor_data(aht10_device_t dev, aht10_data_t *data);
++
+ #endif /* __DRV_AHT10_H__ */
+diff --git a/samples/aht10_sample.c b/samples/aht10_sample.c
+index 3836397..e6a195c 100644
+--- a/samples/aht10_sample.c
++++ b/samples/aht10_sample.c
+@@ -1,4 +1,4 @@
+-/*
++﻿/*
+  * Copyright (c) 2006-2024, RT-Thread Development Team
+  *
+  * SPDX-License-Identifier: Apache-2.0
+@@ -12,6 +12,7 @@
+ #include <rtdevice.h>
+ 
+ #include "aht10.h"
++#include "../../../applications/app/sensor_data.h"
+ 
+ #define DBG_TAG "aht10"
+ #define DBG_LVL DBG_LOG
+@@ -21,6 +22,11 @@
+ #include "sensor_asair_aht10.h"
+ #endif
+ 
++/*
++ * AHT10 示例线程入口：
++ * - sensor_v2 模式：走 RT-Thread Sensor 框架
++ * - 普通模式：直接调用 aht10 驱动接口并周期打印温湿度
++ */
+ static void aht10_entry(void *parameter)
+ {
+ #if defined(PKG_AHT10_USING_SENSOR_V2) && (RTTHREAD_VERSION >= RT_VERSION_CHECK(5, 0, 1))
+@@ -29,6 +35,7 @@ static void aht10_entry(void *parameter)
+     rt_sensor_t aht10_sensor;
+     rt_sensor_data_t aht10_data;
+ 
++    /* 绑定总线与设备地址，注册到 sensor_v2 框架 */
+     cfg.intf.dev_name  = PKG_AHT10_I2C_BUS_NAME;
+     cfg.intf.arg = (void *)AHT10_I2C_ADDR;
+ 
+@@ -40,33 +47,42 @@ static void aht10_entry(void *parameter)
+ #else
+     float humidity, temperature;
+     aht10_device_t dev;
++    aht10_data_t sensor_data;
+ 
+     const char *i2c_bus_name = PKG_AHT10_I2C_BUS_NAME;
+-    int count = 0;
+ 
++    /* 等待系统与总线外设稳定后再启动采样 */
+     rt_thread_mdelay(2000);
+ 
+     dev = aht10_init(i2c_bus_name);
+     if (dev == RT_NULL)
+     {
++        /* 初始化失败时打印错误；失败后直接退出，避免继续使用空句柄 */
+         LOG_E("The sensor initializes failure");
++        return;
+     }
+ 
+     LOG_I("AHT10 has been initialized!");
+ 
+     while (1)
+     {
+-        humidity = aht10_read_humidity(dev);
+-        LOG_D("Humidity   : %d.%d %%", (int)humidity, (int)(humidity * 10) % 10);
++        read_sensor_data(dev, &sensor_data);
++        humidity = sensor_data.cur_humi;
++        temperature = sensor_data.cur_temp;
+ 
+-        temperature = aht10_read_temperature(dev);
+-        LOG_D("Temperature: %d.%d", (int)temperature, (int)(temperature * 10) % 10);
++        sensor_data_update_aht20(temperature, humidity);
+ 
++        LOG_D("Env: %.1f C, %.1f %%RH", temperature, humidity);
++
++        /* 轮询周期 1s */
+         rt_thread_mdelay(1000);
+     }
+ #endif
+ }
+ 
++/*
++ * 将示例线程注册到设备初始化阶段自动启动。
++ */
+ int aht10_thread_port(void)
+ {
+     rt_thread_t res = rt_thread_create("aht10", aht10_entry, RT_NULL, 1024, 20, 50);
+@@ -80,4 +96,4 @@ int aht10_thread_port(void)
+ 
+     return RT_EOK;
+ }
+-INIT_DEVICE_EXPORT(aht10_thread_port);
+\ No newline at end of file
++INIT_DEVICE_EXPORT(aht10_thread_port);
+diff --git a/src/aht10.c b/src/aht10.c
+index c81d4e8..b86ecf0 100644
+--- a/src/aht10.c
++++ b/src/aht10.c
+@@ -1,4 +1,4 @@
+-/*
++﻿/*
+  * Copyright (c) 2006-2022, RT-Thread Development Team
+  *
+  * SPDX-License-Identifier: Apache-2.0
+@@ -22,12 +22,23 @@
+ 
+ #ifdef PKG_USING_AHT10
+ 
+-#define AHT10_ADDR 0x38 //connect GND
++/* AHT10/AHT20 常用 I2C 地址（ADDR 引脚接地） */
++#define AHT10_ADDR 0x38
+ 
+-#define AHT10_CALIBRATION_CMD 0xE1 //calibration cmd for measuring
+-#define AHT10_NORMAL_CMD 0xA8      //normal cmd
+-#define AHT10_GET_DATA 0xAC        //get data cmd
++/* 传感器命令字 */
++#define AHT10_CALIBRATION_CMD 0xE1 /* 校准命令 */
++#define AHT10_NORMAL_CMD 0xA8      /* 正常模式命令 */
++#define AHT10_GET_DATA 0xAC        /* 触发采样命令 */
+ 
++/**
++ * @brief 通过 I2C 写入 1 字节命令 + 2 字节数据
++ *
++ * @param bus I2C 总线设备
++ * @param reg 命令字
++ * @param data 两字节参数
++ *
++ * @return RT_EOK 成功，-RT_ERROR 失败
++ */
+ static rt_err_t write_reg(struct rt_i2c_bus_device *bus, rt_uint8_t reg, rt_uint8_t *data)
+ {
+     rt_uint8_t buf[3];
+@@ -42,6 +53,15 @@ static rt_err_t write_reg(struct rt_i2c_bus_device *bus, rt_uint8_t reg, rt_uint
+         return -RT_ERROR;
+ }
+ 
++/**
++ * @brief 通过 I2C 连续读取寄存器/状态数据
++ *
++ * @param bus I2C 总线设备
++ * @param len 读取长度
++ * @param buf 读取缓冲区
++ *
++ * @return RT_EOK 成功，-RT_ERROR 失败
++ */
+ static rt_err_t read_regs(struct rt_i2c_bus_device *bus, rt_uint8_t len, rt_uint8_t *buf)
+ {
+     struct rt_i2c_msg msgs;
+@@ -61,6 +81,14 @@ static rt_err_t read_regs(struct rt_i2c_bus_device *bus, rt_uint8_t len, rt_uint
+     }
+ }
+ 
++/**
++ * @brief 传感器初始化流程
++ *
++ * 时序说明：
++ * 1. 进入正常模式
++ * 2. 发送校准命令
++ * 3. 每一步之后保留足够延时，避免设备未就绪
++ */
+ static rt_err_t sensor_init(aht10_device_t dev)
+ {
+     rt_uint8_t temp[2] = {0, 0};
+@@ -76,7 +104,7 @@ static rt_err_t sensor_init(aht10_device_t dev)
+     return RT_EOK;
+ }
+ 
+-/*check calibration enable */
++/* 检查校准状态位是否有效 */
+ static rt_uint8_t calibration_enabled(aht10_device_t dev)
+ {
+     rt_uint8_t val = 0;
+@@ -89,6 +117,14 @@ static rt_uint8_t calibration_enabled(aht10_device_t dev)
+         return RT_ERROR;
+ }
+ 
++/**
++ * @brief 读取硬件温度并换算为摄氏度
++ *
++ * 关键流程：
++ * - 互斥锁保护 I2C 访问，避免并发读写冲突
++ * - 先触发采样，再检查校准状态
++ * - 若校准位异常，会打印异常日志并尝试重新初始化
++ */
+ static float read_hw_temperature(aht10_device_t dev)
+ {
+     rt_uint8_t temp[6];
+@@ -100,12 +136,14 @@ static float read_hw_temperature(aht10_device_t dev)
+     result = rt_mutex_take(dev->lock, RT_WAITING_FOREVER);
+     if (result == RT_EOK)
+     {
+-        rt_uint8_t cmd[2] = {0, 0};
++        rt_uint8_t cmd[2] = {0x33, 0x00};
+         write_reg(dev->i2c, AHT10_GET_DATA, cmd); // sample data cmd
++        rt_thread_mdelay(80); /* 等待测量完成，手册要求 ~75ms */
+ 
+         result = calibration_enabled(dev);
+         if (result != RT_EOK)
+         {
++            /* 这里的 "abnormal status" 主要表示校准状态位检查失败 */
+             rt_thread_mdelay(1500);
+             sensor_init(dev); // reset sensor
+             LOG_E("The aht10 is under an abnormal status. Please try again");
+@@ -113,7 +151,7 @@ static float read_hw_temperature(aht10_device_t dev)
+         else
+         {
+             read_regs(dev->i2c, 6, temp); // get data
+-            /*sensor temperature converse to reality */
++            /* 传感器原始数据换算为温度（摄氏度） */
+             cur_temp = ((temp[3] & 0xf) << 16 | temp[4] << 8 | temp[5]) * 200.0 / (1 << 20) - 50;
+         }
+     }
+@@ -126,6 +164,14 @@ static float read_hw_temperature(aht10_device_t dev)
+     return cur_temp;
+ }
+ 
++/**
++ * @brief 读取硬件湿度并换算为 %RH
++ *
++ * 关键流程与温度读取一致：
++ * - 互斥锁保护
++ * - 采样后校验状态位
++ * - 异常时重新初始化并返回兜底值
++ */
+ static float read_hw_humidity(aht10_device_t dev)
+ {
+     rt_uint8_t temp[6];
+@@ -137,12 +183,14 @@ static float read_hw_humidity(aht10_device_t dev)
+     result = rt_mutex_take(dev->lock, RT_WAITING_FOREVER);
+     if (result == RT_EOK)
+     {
+-        rt_uint8_t cmd[2] = {0, 0};
++        rt_uint8_t cmd[2] = {0x33, 0x00};
+         write_reg(dev->i2c, AHT10_GET_DATA, cmd); // sample data cmd
++        rt_thread_mdelay(80); /* 等待测量完成，手册要求 ~75ms */
+ 
+         result = calibration_enabled(dev);
+         if (result != RT_EOK)
+         {
++            /* 这里的 "abnormal status" 主要表示校准状态位检查失败 */
+             rt_thread_mdelay(1500);
+             sensor_init(dev);
+             LOG_E("The aht10 is under an abnormal status. Please try again");
+@@ -150,6 +198,7 @@ static float read_hw_humidity(aht10_device_t dev)
+         else
+         {
+             read_regs(dev->i2c, 6, temp); // get data
++            /* 传感器原始数据换算为相对湿度 */
+             cur_humi = (temp[1] << 12 | temp[2] << 4 | (temp[3] & 0xf0) >> 4) * 100.0 / (1 << 20); //sensor humidity converse to reality
+         }
+     }
+@@ -162,8 +211,67 @@ static float read_hw_humidity(aht10_device_t dev)
+     return cur_humi;
+ }
+ 
++/* 清除结构体中的历史数据 */
++static void clear_str_data(aht10_data_t *data)
++{
++    data->cur_humi = 0.0f;
++    data->cur_temp = -50.0f;
++}
++
++/**
++ * @brief 读取传感器所有数据
++ *
++ * - 互斥锁保护
++ * - 采样后校验状态位
++ * - 异常时重新初始化并返回兜底值
++ */
++void read_sensor_data(aht10_device_t dev, aht10_data_t *data)
++{
++    rt_uint8_t temp[6];
++    rt_err_t result;
++
++    RT_ASSERT(dev);
++    RT_ASSERT(data);
++
++    clear_str_data(data); // 对结构体数据进行清空
++
++    result = rt_mutex_take(dev->lock, RT_WAITING_FOREVER);
++    if (result == RT_EOK)
++    {
++        rt_uint8_t cmd[2] = {0x33, 0x00};
++        write_reg(dev->i2c, AHT10_GET_DATA, cmd); // sample data cmd
++        rt_thread_mdelay(80); /* 等待测量完成，手册要求 ~75ms */
++
++        result = calibration_enabled(dev);
++        if (result != RT_EOK)
++        {
++            /* 这里的 "abnormal status" 主要表示校准状态位检查失败 */
++            rt_thread_mdelay(1500);
++            sensor_init(dev);
++            LOG_E("The aht10 is under an abnormal status. Please try again");
++        }
++        else
++        {
++            read_regs(dev->i2c, 6, temp); // get data
++            /* 传感器原始数据换算为相对湿度 */
++            data->cur_humi = (temp[1] << 12 | temp[2] << 4 | (temp[3] & 0xf0) >> 4) * 100.0 / (1 << 20);
++            /* 传感器原始数据换算为温度（摄氏度） */
++            data->cur_temp = ((temp[3] & 0xf) << 16 | temp[4] << 8 | temp[5]) * 200.0 / (1 << 20) - 50;
++        }
++    }
++    else
++    {
++        LOG_E("The aht10 could not respond any sensor data at this time. Please try again");
++    }
++    rt_mutex_release(dev->lock);
++}
+ #ifdef AHT10_USING_SOFT_FILTER
+ 
++/**
++ * @brief 计算软滤波平均值
++ *
++ * 当缓存未填满时按当前数量求平均；填满后按固定窗口求平均。
++ */
+ static void average_measurement(aht10_device_t dev, filter_data_t *filter)
+ {
+     rt_uint32_t i;
+@@ -198,6 +306,11 @@ static void average_measurement(aht10_device_t dev, filter_data_t *filter)
+     rt_mutex_release(dev->lock);
+ }
+ 
++/**
++ * @brief 软滤波线程入口
++ *
++ * 周期读取温湿度并写入环形缓冲区，供平均值读取接口使用。
++ */
+ static void aht10_filter_entry(void *device)
+ {
+     RT_ASSERT(device);
+@@ -237,11 +350,10 @@ static void aht10_filter_entry(void *device)
+ #endif /* AHT10_USING_SOFT_FILTER */
+ 
+ /**
+- * This function reads temperature by aht10 sensor measurement
++ * @brief 读取温度接口
+  *
+- * @param dev the pointer of device driver structure
+- *
+- * @return the relative temperature converted to float data.
++ * - 使能软滤波时返回平均值
++ * - 未使能时直接返回硬件采样值
+  */
+ float aht10_read_temperature(aht10_device_t dev)
+ {
+@@ -255,11 +367,10 @@ float aht10_read_temperature(aht10_device_t dev)
+ }
+ 
+ /**
+- * This function reads relative humidity by aht10 sensor measurement
+- *
+- * @param dev the pointer of device driver structure
++ * @brief 读取湿度接口
+  *
+- * @return the relative humidity converted to float data.
++ * - 使能软滤波时返回平均值
++ * - 未使能时直接返回硬件采样值
+  */
+ float aht10_read_humidity(aht10_device_t dev)
+ {
+@@ -273,11 +384,14 @@ float aht10_read_humidity(aht10_device_t dev)
+ }
+ 
+ /**
+- * This function initializes aht10 registered device driver
+- *
+- * @param dev the name of aht10 device
++ * @brief 初始化 AHT10 驱动实例
+  *
+- * @return the aht10 device.
++ * 流程：
++ * 1. 分配设备对象
++ * 2. 查找 I2C 总线
++ * 3. 创建互斥锁
++ * 4. （可选）创建软滤波线程
++ * 5. 发送传感器初始化命令
+  */
+ aht10_device_t aht10_init(const char *i2c_bus_name)
+ {
+@@ -330,9 +444,9 @@ aht10_device_t aht10_init(const char *i2c_bus_name)
+ }
+ 
+ /**
+- * This function releases memory and deletes mutex lock
++ * @brief 反初始化 AHT10 驱动实例
+  *
+- * @param dev the pointer of device driver structure
++ * 释放顺序：互斥锁 ->（可选）滤波线程 -> 设备内存。
+  */
+ void aht10_deinit(aht10_device_t dev)
+ {

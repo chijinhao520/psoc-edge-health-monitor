@@ -1,0 +1,13 @@
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.png binary
+*.ttf binary
+*.patch -text
+*.patch whitespace=-trailing-space
+dashboard/static/vendor/chart.umd.js whitespace=-blank-at-eof
